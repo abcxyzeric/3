@@ -117,7 +117,8 @@ export default function SnippetOverlay() {
                     body: JSON.stringify({
                         image: base64,
                         modelId,
-                        prompt
+                        prompt,
+                        apiKey: import.meta.env.VITE_GOOGLE_API_KEY
                     })
                 })
 
