@@ -81,24 +81,51 @@ export default function SnippetOverlay() {
             ctx.drawImage(img, x * scale, y * scale, w * scale, h * scale, 0, 0, w * scale, h * scale)
             const base64 = canvas.toDataURL('image/jpeg', 0.85)
 
-            // Send to Server
+            // Send to Server (Proxy to Gemini API)
             try {
                 const modelId = localStorage.getItem('modelId') || 'gemini-3-flash'
-                const prompt = localStorage.getItem('systemPrompt') || 'Translate this text to Vietnamese.'
+                let prompt = localStorage.getItem('systemPrompt') || 'Translate this text to Vietnamese.'
+                const apiKey = localStorage.getItem('geminiApiKey') || ''
 
-                const response = await fetch('http://localhost:8889/api/translate', {
+                // Remove Data URI prefix for Gemini API (data:image/jpeg;base64,)
+                const base64Data = base64.split(',')[1]
+
+                // Use Standard Gemini API Endpoint
+                // We point to localhost:8889, dark-server forwards to Browser, Browser calls Google
+                const url = `http://localhost:8889/v1beta/models/${modelId}:generateContent?key=${apiKey}`
+
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        image: base64,
-                        modelId,
-                        prompt,
-                        apiKey: import.meta.env.VITE_GOOGLE_API_KEY
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inline_data: {
+                                        mime_type: "image/jpeg",
+                                        data: base64Data
+                                    }
+                                }
+                            ]
+                        }]
                     })
                 })
 
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status} ${response.statusText}`)
+                }
+
                 const data = await response.json()
-                const resultText = data.text || data.result || 'No result.'
+
+                // Parse Gemini Response
+                // Structure: data.candidates[0].content.parts[0].text
+                let resultText = 'No result.'
+                if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
+                    resultText = data.candidates[0].content.parts[0].text
+                } else if (data.error) {
+                    resultText = `Error: ${data.error.message || 'Unknown API Error'}`
+                }
 
                 // Send result to Main -> Toolbar
                 window.ipcRenderer.send('translation-result', resultText)
@@ -106,9 +133,9 @@ export default function SnippetOverlay() {
                 // Hide overlay
                 window.ipcRenderer.send('hide-overlay')
 
-            } catch (err) {
+            } catch (err: any) {
                 console.error(err)
-                window.ipcRenderer.send('translation-result', 'Error: Could not connect to server.')
+                window.ipcRenderer.send('translation-result', `Error: ${err.message || 'Connection falied'}`)
                 window.ipcRenderer.send('hide-overlay')
             }
         }

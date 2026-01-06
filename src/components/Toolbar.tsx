@@ -3,7 +3,7 @@ import { GripHorizontal, Circle, Scan, Settings, X, Save, Copy, ChevronDown } fr
 import './Toolbar.css'
 
 const AVAILABLE_MODELS = [
-    { id: 'gemini-3-flash', name: 'Gemini 3 Flash' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
     { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' }
 ]
 
@@ -12,14 +12,17 @@ export default function Toolbar() {
     const [showSettings, setShowSettings] = useState(false)
     const [modelId, setModelId] = useState('gemini-3-flash')
     const [systemPrompt, setSystemPrompt] = useState('')
+    const [apiKey, setApiKey] = useState('')
     const [translationResult, setTranslationResult] = useState<string | null>(null)
 
     // Load settings & listen for translation results
     useEffect(() => {
         const storedModel = localStorage.getItem('modelId') || 'gemini-3-flash'
         const storedPrompt = localStorage.getItem('systemPrompt') || 'Translate this text to Vietnamese.'
+        const storedApiKey = localStorage.getItem('geminiApiKey') || ''
         setModelId(storedModel)
         setSystemPrompt(storedPrompt)
+        setApiKey(storedApiKey)
 
         // Status check (mock - assume connected if server running)
         const interval = setInterval(() => {
@@ -40,7 +43,7 @@ export default function Toolbar() {
     // Handle Toolbar Resize for Settings Panel
     useEffect(() => {
         if (showSettings) {
-            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 400 })
+            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 480 })
         } else if (translationResult) {
             window.ipcRenderer.send('resize-toolbar', { width: 500, height: 250 })
         } else {
@@ -51,6 +54,7 @@ export default function Toolbar() {
     const handleSave = () => {
         localStorage.setItem('modelId', modelId)
         localStorage.setItem('systemPrompt', systemPrompt)
+        localStorage.setItem('geminiApiKey', apiKey)
         setShowSettings(false)
     }
 
@@ -132,6 +136,17 @@ export default function Toolbar() {
                     <h3 className="settings-title">
                         <Settings size={16} /> Configuration
                     </h3>
+
+                    <div className="form-group">
+                        <label className="form-label">API Key</label>
+                        <input
+                            type="password"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="form-input"
+                            placeholder="Enter your Gemini API Key..."
+                        />
+                    </div>
 
                     <div className="form-group">
                         <label className="form-label">Model</label>

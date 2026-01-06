@@ -230,6 +230,23 @@
     color: #666;
 }
 
+.form-input {
+    width: 100%;
+    padding: 10px 12px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s ease;
+    box-sizing: border-box;
+}
+
+.form-input:focus {
+    border-color: #3b82f6;
+}
+
 .select-wrapper {
     position: relative;
 }
