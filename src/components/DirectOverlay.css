@@ -1,0 +1,132 @@
+.overlay-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.overlay-container.pointer-none {
+    pointer-events: none;
+}
+
+.overlay-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+.overlay-dim {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+}
+
+.selection-box {
+    position: absolute;
+    border: 2px solid #22d3ee;
+    background: rgba(34, 211, 238, 0.1);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    z-index: 10;
+}
+
+.loading-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(15, 15, 20, 0.95);
+    color: white;
+    padding: 14px 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.instruction-text {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: #888;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    z-index: 100;
+}
+
+/* Game Patch Boxes */
+.patch-box {
+    position: absolute;
+    background: #111;
+    /* Solid dark background to cover original text */
+    color: #fff;
+    padding: 0 4px;
+    /* Minimal padding */
+    font-size: 14px;
+    line-height: normal;
+    /* Allow centering */
+    border-radius: 2px;
+    /* Slight roundness but mostly sharp */
+    z-index: 50;
+    pointer-events: none;
+    white-space: pre-wrap;
+    overflow: hidden;
+    /* Cut off text if it overflows height */
+    box-shadow: none;
+    /* No shadow for flat look */
+    border: none;
+    /* Seamless look */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+@keyframes patchIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}

@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 process.env.APP_ROOT = path.join(__dirname, '..')
 
-// CRITICAL: Disable Hardware Acceleration to fix visual glitches on Windows with transparent windows
+// CRITICAL: Disable Hardware Acceleration for Windows 10 transparent window stability
 app.disableHardwareAcceleration()
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -19,9 +19,13 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 // ============= WINDOW REFERENCES =============
-let toolbarWin: BrowserWindow | null = null
+let commanderWin: BrowserWindow | null = null
+let chatWin: BrowserWindow | null = null
 let overlayWin: BrowserWindow | null = null
 let serverProcess: ChildProcess | null = null
+
+// Current display mode: 'chatbox' or 'overlay'
+let currentMode: 'chatbox' | 'overlay' = 'chatbox'
 
 // ============= SERVER PATH =============
 const SERVER_PATH = app.isPackaged
@@ -31,10 +35,7 @@ const SERVER_PATH = app.isPackaged
 // ============= SERVER MANAGEMENT =============
 function startServer() {
   console.log('Starting dark-server at:', SERVER_PATH)
-  serverProcess = fork(SERVER_PATH, [], {
-    stdio: 'inherit',
-    env: { ...process.env }
-  })
+  serverProcess = fork(SERVER_PATH, [], { stdio: 'inherit', env: { ...process.env } })
 }
 
 function stopServer() {
@@ -44,16 +45,17 @@ function stopServer() {
   }
 }
 
-// ============= TOOLBAR WINDOW (Window A) =============
-function createToolbarWindow() {
-  toolbarWin = new BrowserWindow({
-    width: 500,
-    height: 70,
+// ============= WINDOW A: COMMANDER (TOOLBAR) =============
+function createCommanderWindow() {
+  commanderWin = new BrowserWindow({
+    width: 420,
+    height: 60,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: false,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
@@ -62,21 +64,57 @@ function createToolbarWindow() {
     }
   })
 
-  // Load Toolbar Route (default route or #/toolbar)
+  // Load default route (/)
   if (VITE_DEV_SERVER_URL) {
-    toolbarWin.loadURL(VITE_DEV_SERVER_URL) // Default route is Toolbar
+    commanderWin.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    toolbarWin.loadFile(path.join(RENDERER_DIST, 'index.html'))
+    commanderWin.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
-  toolbarWin.on('closed', () => {
-    toolbarWin = null
-    // When toolbar closes, quit app
+  commanderWin.on('closed', () => {
+    commanderWin = null
     app.quit()
   })
 }
 
-// ============= OVERLAY WINDOW (Window B) =============
+// ============= WINDOW B: CHATBOX (TRANSLUMO STYLE) =============
+function createChatWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.bounds
+
+  chatWin = new BrowserWindow({
+    width: 400,
+    height: 500,
+    x: screenWidth - 420,
+    y: screenHeight - 550,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: true, // Visible by default in Chatbox mode
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false
+    }
+  })
+
+  // Load /chat route
+  const chatUrl = VITE_DEV_SERVER_URL
+    ? `${VITE_DEV_SERVER_URL}#/chat`
+    : `file://${path.join(RENDERER_DIST, 'index.html')}#/chat`
+
+  chatWin.loadURL(chatUrl)
+
+  chatWin.on('closed', () => {
+    chatWin = null
+  })
+}
+
+// ============= WINDOW C: OVERLAY (GAME PATCH) =============
 function createOverlayWindow() {
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width, height } = primaryDisplay.bounds
@@ -92,7 +130,7 @@ function createOverlayWindow() {
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
-    show: false, // HIDDEN by default
+    show: false, // Hidden by default
     enableLargerThanScreen: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -102,7 +140,7 @@ function createOverlayWindow() {
     }
   })
 
-  // Load Overlay Route
+  // Load /overlay route
   const overlayUrl = VITE_DEV_SERVER_URL
     ? `${VITE_DEV_SERVER_URL}#/overlay`
     : `file://${path.join(RENDERER_DIST, 'index.html')}#/overlay`
@@ -127,61 +165,96 @@ app.on('before-quit', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createToolbarWindow()
+    createCommanderWindow()
+    createChatWindow()
     createOverlayWindow()
   }
 })
 
 app.whenReady().then(() => {
   startServer()
-  createToolbarWindow()
+  createCommanderWindow()
+  createChatWindow()
   createOverlayWindow()
 
   // ============= IPC HANDLERS =============
 
-  // Show Overlay when Scan is triggered
+  // Switch Display Mode
+  ipcMain.on('set-mode', (_event, mode: 'chatbox' | 'overlay') => {
+    currentMode = mode
+    if (mode === 'chatbox') {
+      chatWin?.show()
+      overlayWin?.hide()
+    } else {
+      // In overlay mode, chatbox can stay visible or hide - user preference
+      // For now, keep chatbox visible but overlay activates on scan
+    }
+  })
+
+  // Trigger Scan
   ipcMain.on('trigger-scan', async () => {
-    if (overlayWin) {
-      // Capture screen BEFORE showing overlay to avoid capturing itself
-      const primaryDisplay = screen.getPrimaryDisplay()
-      const { width, height } = primaryDisplay.bounds
-      const scaleFactor = primaryDisplay.scaleFactor || 1
+    // Capture screen first
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.bounds
+    const scaleFactor = primaryDisplay.scaleFactor || 1
 
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: {
-          width: width * scaleFactor,
-          height: height * scaleFactor
-        }
-      })
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: width * scaleFactor, height: height * scaleFactor }
+    })
 
-      const screenImage = sources[0].thumbnail.toDataURL()
+    const screenImage = sources[0].thumbnail.toDataURL()
 
-      // Send image to overlay before showing it
-      overlayWin.webContents.send('screen-captured', screenImage)
-      overlayWin.show()
-      overlayWin.focus()
+    if (currentMode === 'overlay') {
+      // Show overlay for selection
+      overlayWin?.webContents.send('screen-captured', screenImage)
+      overlayWin?.show()
+      overlayWin?.focus()
+    } else {
+      // Chatbox mode: still use overlay for capture, but result goes to chatbox
+      overlayWin?.webContents.send('screen-captured', screenImage)
+      overlayWin?.show()
+      overlayWin?.focus()
     }
   })
 
-  // Hide Overlay when done
+  // Hide Overlay (after selection or cancel)
   ipcMain.on('hide-overlay', () => {
-    if (overlayWin) {
-      overlayWin.hide()
+    if (currentMode === 'chatbox') {
+      overlayWin?.hide()
+    }
+    // In overlay mode, we keep it visible to show the translated text patch
+  })
+
+  // Translation Result - Route based on mode
+  ipcMain.on('translation-result', (_event, data: { text: string; rect?: { x: number; y: number; w: number; h: number } }) => {
+    if (currentMode === 'chatbox') {
+      // Send to Chatbox
+      chatWin?.webContents.send('new-message', data.text)
+      overlayWin?.hide()
+    } else {
+      // Send to Overlay for in-place rendering
+      overlayWin?.webContents.send('show-patch', data)
     }
   })
 
-  // Forward translation result to Toolbar
-  ipcMain.on('translation-result', (_event, result: string) => {
-    if (toolbarWin) {
-      toolbarWin.webContents.send('translation-result', result)
+  // Clear Overlay Patches
+  ipcMain.on('clear-patches', () => {
+    overlayWin?.webContents.send('clear-patches')
+    overlayWin?.hide()
+  })
+
+  // Resize Commander (for settings panel)
+  ipcMain.on('resize-commander', (_event, { width, height }) => {
+    if (commanderWin) {
+      commanderWin.setBounds({ width, height })
     }
   })
 
-  // Toolbar resize (for Settings Panel expand/collapse)
-  ipcMain.on('resize-toolbar', (_event, { width, height }) => {
-    if (toolbarWin) {
-      toolbarWin.setBounds({ width, height })
+  // Toggle Chatbox Click-Through
+  ipcMain.on('toggle-chat-clickthrough', (_event, enabled: boolean) => {
+    if (chatWin) {
+      chatWin.setIgnoreMouseEvents(enabled, { forward: true })
     }
   })
 

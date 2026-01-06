@@ -11,16 +11,15 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-let toolbarWin = null;
+let commanderWin = null;
+let chatWin = null;
 let overlayWin = null;
 let serverProcess = null;
+let currentMode = "chatbox";
 const SERVER_PATH = app.isPackaged ? path.join(process.resourcesPath, "server", "dark-server.js") : path.join(process.env.APP_ROOT, "server", "dark-server.js");
 function startServer() {
   console.log("Starting dark-server at:", SERVER_PATH);
-  serverProcess = fork(SERVER_PATH, [], {
-    stdio: "inherit",
-    env: { ...process.env }
-  });
+  serverProcess = fork(SERVER_PATH, [], { stdio: "inherit", env: { ...process.env } });
 }
 function stopServer() {
   if (serverProcess) {
@@ -28,15 +27,16 @@ function stopServer() {
     serverProcess = null;
   }
 }
-function createToolbarWindow() {
-  toolbarWin = new BrowserWindow({
-    width: 500,
-    height: 70,
+function createCommanderWindow() {
+  commanderWin = new BrowserWindow({
+    width: 420,
+    height: 60,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: false,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname$1, "preload.mjs"),
       nodeIntegration: false,
@@ -45,13 +45,42 @@ function createToolbarWindow() {
     }
   });
   if (VITE_DEV_SERVER_URL) {
-    toolbarWin.loadURL(VITE_DEV_SERVER_URL);
+    commanderWin.loadURL(VITE_DEV_SERVER_URL);
   } else {
-    toolbarWin.loadFile(path.join(RENDERER_DIST, "index.html"));
+    commanderWin.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
-  toolbarWin.on("closed", () => {
-    toolbarWin = null;
+  commanderWin.on("closed", () => {
+    commanderWin = null;
     app.quit();
+  });
+}
+function createChatWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.bounds;
+  chatWin = new BrowserWindow({
+    width: 400,
+    height: 500,
+    x: screenWidth - 420,
+    y: screenHeight - 550,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: true,
+    // Visible by default in Chatbox mode
+    webPreferences: {
+      preload: path.join(__dirname$1, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: false
+    }
+  });
+  const chatUrl = VITE_DEV_SERVER_URL ? `${VITE_DEV_SERVER_URL}#/chat` : `file://${path.join(RENDERER_DIST, "index.html")}#/chat`;
+  chatWin.loadURL(chatUrl);
+  chatWin.on("closed", () => {
+    chatWin = null;
   });
 }
 function createOverlayWindow() {
@@ -69,7 +98,7 @@ function createOverlayWindow() {
     resizable: false,
     hasShadow: false,
     show: false,
-    // HIDDEN by default
+    // Hidden by default
     enableLargerThanScreen: true,
     webPreferences: {
       preload: path.join(__dirname$1, "preload.mjs"),
@@ -94,45 +123,67 @@ app.on("before-quit", () => {
 });
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createToolbarWindow();
+    createCommanderWindow();
+    createChatWindow();
     createOverlayWindow();
   }
 });
 app.whenReady().then(() => {
   startServer();
-  createToolbarWindow();
+  createCommanderWindow();
+  createChatWindow();
   createOverlayWindow();
+  ipcMain.on("set-mode", (_event, mode) => {
+    currentMode = mode;
+    if (mode === "chatbox") {
+      chatWin == null ? void 0 : chatWin.show();
+      overlayWin == null ? void 0 : overlayWin.hide();
+    }
+  });
   ipcMain.on("trigger-scan", async () => {
-    if (overlayWin) {
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { width, height } = primaryDisplay.bounds;
-      const scaleFactor = primaryDisplay.scaleFactor || 1;
-      const sources = await desktopCapturer.getSources({
-        types: ["screen"],
-        thumbnailSize: {
-          width: width * scaleFactor,
-          height: height * scaleFactor
-        }
-      });
-      const screenImage = sources[0].thumbnail.toDataURL();
-      overlayWin.webContents.send("screen-captured", screenImage);
-      overlayWin.show();
-      overlayWin.focus();
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.bounds;
+    const scaleFactor = primaryDisplay.scaleFactor || 1;
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: width * scaleFactor, height: height * scaleFactor }
+    });
+    const screenImage = sources[0].thumbnail.toDataURL();
+    if (currentMode === "overlay") {
+      overlayWin == null ? void 0 : overlayWin.webContents.send("screen-captured", screenImage);
+      overlayWin == null ? void 0 : overlayWin.show();
+      overlayWin == null ? void 0 : overlayWin.focus();
+    } else {
+      overlayWin == null ? void 0 : overlayWin.webContents.send("screen-captured", screenImage);
+      overlayWin == null ? void 0 : overlayWin.show();
+      overlayWin == null ? void 0 : overlayWin.focus();
     }
   });
   ipcMain.on("hide-overlay", () => {
-    if (overlayWin) {
-      overlayWin.hide();
+    if (currentMode === "chatbox") {
+      overlayWin == null ? void 0 : overlayWin.hide();
     }
   });
-  ipcMain.on("translation-result", (_event, result) => {
-    if (toolbarWin) {
-      toolbarWin.webContents.send("translation-result", result);
+  ipcMain.on("translation-result", (_event, data) => {
+    if (currentMode === "chatbox") {
+      chatWin == null ? void 0 : chatWin.webContents.send("new-message", data.text);
+      overlayWin == null ? void 0 : overlayWin.hide();
+    } else {
+      overlayWin == null ? void 0 : overlayWin.webContents.send("show-patch", data);
     }
   });
-  ipcMain.on("resize-toolbar", (_event, { width, height }) => {
-    if (toolbarWin) {
-      toolbarWin.setBounds({ width, height });
+  ipcMain.on("clear-patches", () => {
+    overlayWin == null ? void 0 : overlayWin.webContents.send("clear-patches");
+    overlayWin == null ? void 0 : overlayWin.hide();
+  });
+  ipcMain.on("resize-commander", (_event, { width, height }) => {
+    if (commanderWin) {
+      commanderWin.setBounds({ width, height });
+    }
+  });
+  ipcMain.on("toggle-chat-clickthrough", (_event, enabled) => {
+    if (chatWin) {
+      chatWin.setIgnoreMouseEvents(enabled, { forward: true });
     }
   });
   ipcMain.on("app-quit", () => {

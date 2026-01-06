@@ -1,65 +1,55 @@
 import { useState, useEffect } from 'react'
-import { GripHorizontal, Circle, Scan, Settings, X, Save, Copy, ChevronDown } from 'lucide-react'
+import { GripHorizontal, Scan, Settings, X, Save, ToggleLeft, ToggleRight, MessageSquare, Layers } from 'lucide-react'
 import './Toolbar.css'
 
 const AVAILABLE_MODELS = [
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' }
 ]
 
+type DisplayMode = 'chatbox' | 'overlay'
+
 export default function Toolbar() {
-    const [status, setStatus] = useState<'connected' | 'disconnected'>('disconnected')
     const [showSettings, setShowSettings] = useState(false)
-    const [modelId, setModelId] = useState('gemini-3-flash')
+    const [modelId, setModelId] = useState('gemini-3-flash-preview')
     const [systemPrompt, setSystemPrompt] = useState('')
     const [apiKey, setApiKey] = useState('')
-    const [translationResult, setTranslationResult] = useState<string | null>(null)
+    const [displayMode, setDisplayMode] = useState<DisplayMode>('chatbox')
 
-    // Load settings & listen for translation results
+    // Load settings
     useEffect(() => {
-        const storedModel = localStorage.getItem('modelId') || 'gemini-3-flash'
+        const storedModel = localStorage.getItem('modelId') || 'gemini-3-flash-preview'
         const storedPrompt = localStorage.getItem('systemPrompt') || 'Translate this text to Vietnamese.'
         const storedApiKey = localStorage.getItem('geminiApiKey') || ''
+        const storedMode = (localStorage.getItem('displayMode') as DisplayMode) || 'chatbox'
         setModelId(storedModel)
         setSystemPrompt(storedPrompt)
         setApiKey(storedApiKey)
+        setDisplayMode(storedMode)
 
-        // Status check (mock - assume connected if server running)
-        const interval = setInterval(() => {
-            setStatus('connected')
-        }, 2000)
-
-        // Listen for translation result from Main Process
-        window.ipcRenderer.on('translation-result', (_event: any, result: string) => {
-            setTranslationResult(result)
-        })
-
-        return () => {
-            clearInterval(interval)
-            // Note: Ideally remove listener too, but for simplicity...
-        }
+        // Notify main process of current mode
+        window.ipcRenderer.send('set-mode', storedMode)
     }, [])
 
     // Handle Toolbar Resize for Settings Panel
     useEffect(() => {
         if (showSettings) {
-            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 480 })
-        } else if (translationResult) {
-            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 250 })
+            window.ipcRenderer.send('resize-commander', { width: 420, height: 380 })
         } else {
-            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 70 })
+            window.ipcRenderer.send('resize-commander', { width: 420, height: 60 })
         }
-    }, [showSettings, translationResult])
+    }, [showSettings])
 
     const handleSave = () => {
         localStorage.setItem('modelId', modelId)
         localStorage.setItem('systemPrompt', systemPrompt)
         localStorage.setItem('geminiApiKey', apiKey)
+        localStorage.setItem('displayMode', displayMode)
+        window.ipcRenderer.send('set-mode', displayMode)
         setShowSettings(false)
     }
 
     const handleScan = () => {
-        setTranslationResult(null) // Clear previous result
         window.ipcRenderer.send('trigger-scan')
     }
 
@@ -67,14 +57,11 @@ export default function Toolbar() {
         window.ipcRenderer.send('app-quit')
     }
 
-    const copyResult = () => {
-        if (translationResult) {
-            navigator.clipboard.writeText(translationResult)
-        }
-    }
-
-    const clearResult = () => {
-        setTranslationResult(null)
+    const toggleMode = () => {
+        const newMode: DisplayMode = displayMode === 'chatbox' ? 'overlay' : 'chatbox'
+        setDisplayMode(newMode)
+        localStorage.setItem('displayMode', newMode)
+        window.ipcRenderer.send('set-mode', newMode)
     }
 
     return (
@@ -82,61 +69,48 @@ export default function Toolbar() {
             {/* Main Nav Bar */}
             <div className="toolbar-nav drag-handle">
                 <div className="nav-left no-drag">
-                    <GripHorizontal size={18} style={{ opacity: 0.4, marginRight: 8 }} />
-                    <div className="status-indicator" title={status === 'connected' ? 'Connected' : 'Disconnected'}>
-                        <Circle size={8} fill={status === 'connected' ? '#22c55e' : '#ef4444'} stroke="none" />
-                        <span className="status-text">{status === 'connected' ? 'ONLINE' : 'OFFLINE'}</span>
-                    </div>
+                    <GripHorizontal size={16} className="grip-icon" />
+
+                    {/* Mode Toggle */}
+                    <button onClick={toggleMode} className="mode-toggle" title={`Mode: ${displayMode === 'chatbox' ? 'Chatbox' : 'Overlay'} `}>
+                        {displayMode === 'chatbox' ? (
+                            <>
+                                <MessageSquare size={14} />
+                                <span>Chat</span>
+                            </>
+                        ) : (
+                            <>
+                                <Layers size={14} />
+                                <span>Patch</span>
+                            </>
+                        )}
+                    </button>
                 </div>
 
                 <div className="nav-right no-drag">
                     <button onClick={handleScan} className="scan-btn">
-                        <Scan size={16} />
+                        <Scan size={14} />
                         SCAN
                     </button>
 
                     <button
                         onClick={() => setShowSettings(!showSettings)}
-                        className={`icon-btn ${showSettings ? 'active' : ''}`}
+                        className={`icon - btn ${showSettings ? 'active' : ''} `}
                     >
-                        <Settings size={18} />
+                        <Settings size={16} />
                     </button>
 
                     <div className="separator" />
 
                     <button onClick={handleClose} className="icon-btn btn-danger">
-                        <X size={18} />
+                        <X size={16} />
                     </button>
                 </div>
             </div>
 
-            {/* Translation Result Panel */}
-            {translationResult && !showSettings && (
-                <div className="result-panel">
-                    <div className="result-header">
-                        <span className="result-title">Translation Result</span>
-                        <div className="result-actions">
-                            <button className="icon-btn-sm" onClick={copyResult} title="Copy">
-                                <Copy size={14} />
-                            </button>
-                            <button className="icon-btn-sm" onClick={clearResult} title="Clear">
-                                <X size={14} />
-                            </button>
-                        </div>
-                    </div>
-                    <div className="result-content">
-                        {translationResult}
-                    </div>
-                </div>
-            )}
-
             {/* Settings Panel */}
             {showSettings && (
                 <div className="settings-panel">
-                    <h3 className="settings-title">
-                        <Settings size={16} /> Configuration
-                    </h3>
-
                     <div className="form-group">
                         <label className="form-label">API Key</label>
                         <input
@@ -150,20 +124,17 @@ export default function Toolbar() {
 
                     <div className="form-group">
                         <label className="form-label">Model</label>
-                        <div className="select-wrapper">
-                            <select
-                                value={modelId}
-                                onChange={(e) => setModelId(e.target.value)}
-                                className="form-select"
-                            >
-                                {AVAILABLE_MODELS.map((model) => (
-                                    <option key={model.id} value={model.id}>
-                                        {model.name}
-                                    </option>
-                                ))}
-                            </select>
-                            <ChevronDown size={14} className="select-icon" />
-                        </div>
+                        <select
+                            value={modelId}
+                            onChange={(e) => setModelId(e.target.value)}
+                            className="form-select"
+                        >
+                            {AVAILABLE_MODELS.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                    {model.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
 
                     <div className="form-group" style={{ flex: 1 }}>
