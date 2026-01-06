@@ -11,7 +11,7 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-let win = null;
+let toolbarWin = null;
 let overlayWin = null;
 let serverProcess = null;
 const SERVER_PATH = app.isPackaged ? path.join(process.resourcesPath, "server", "dark-server.js") : path.join(process.env.APP_ROOT, "server", "dark-server.js");
@@ -19,7 +19,7 @@ function startServer() {
   console.log("Starting dark-server at:", SERVER_PATH);
   serverProcess = fork(SERVER_PATH, [], {
     stdio: "inherit",
-    env: { ...process.env, PORT: "3000", WS_PORT: "9998" }
+    env: { ...process.env }
   });
 }
 function stopServer() {
@@ -28,10 +28,10 @@ function stopServer() {
     serverProcess = null;
   }
 }
-function createWindow() {
-  win = new BrowserWindow({
-    width: 600,
-    height: 80,
+function createToolbarWindow() {
+  toolbarWin = new BrowserWindow({
+    width: 500,
+    height: 70,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -45,16 +45,16 @@ function createWindow() {
     }
   });
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
+    toolbarWin.loadURL(VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
+    toolbarWin.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
+  toolbarWin.on("closed", () => {
+    toolbarWin = null;
+    app.quit();
+  });
 }
 function createOverlayWindow() {
-  if (overlayWin) {
-    overlayWin.show();
-    return;
-  }
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.bounds;
   overlayWin = new BrowserWindow({
@@ -68,17 +68,18 @@ function createOverlayWindow() {
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
+    show: false,
+    // HIDDEN by default
     enableLargerThanScreen: true,
     webPreferences: {
       preload: path.join(__dirname$1, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false
-      // Allow loading local base64
     }
   });
-  const urlToLoad = VITE_DEV_SERVER_URL ? `${VITE_DEV_SERVER_URL}#/overlay` : `file://${path.join(RENDERER_DIST, "index.html")}#/overlay`;
-  overlayWin.loadURL(urlToLoad);
+  const overlayUrl = VITE_DEV_SERVER_URL ? `${VITE_DEV_SERVER_URL}#/overlay` : `file://${path.join(RENDERER_DIST, "index.html")}#/overlay`;
+  overlayWin.loadURL(overlayUrl);
   overlayWin.on("closed", () => {
     overlayWin = null;
   });
@@ -93,38 +94,46 @@ app.on("before-quit", () => {
 });
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    createToolbarWindow();
+    createOverlayWindow();
   }
 });
 app.whenReady().then(() => {
   startServer();
-  createWindow();
-  ipcMain.on("start-scan", () => {
-    createOverlayWindow();
-  });
-  ipcMain.on("close-overlay", () => {
+  createToolbarWindow();
+  createOverlayWindow();
+  ipcMain.on("trigger-scan", async () => {
     if (overlayWin) {
-      overlayWin.close();
-      overlayWin = null;
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width, height } = primaryDisplay.bounds;
+      const scaleFactor = primaryDisplay.scaleFactor || 1;
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: {
+          width: width * scaleFactor,
+          height: height * scaleFactor
+        }
+      });
+      const screenImage = sources[0].thumbnail.toDataURL();
+      overlayWin.webContents.send("screen-captured", screenImage);
+      overlayWin.show();
+      overlayWin.focus();
     }
   });
-  ipcMain.on("resize-me", (_event, { width, height }) => {
-    if (win) {
-      win.setBounds({ width, height });
+  ipcMain.on("hide-overlay", () => {
+    if (overlayWin) {
+      overlayWin.hide();
     }
   });
-  ipcMain.handle("get-screen-image", async () => {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.bounds;
-    const scaleFactor = primaryDisplay.scaleFactor || 1;
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: {
-        width: width * scaleFactor,
-        height: height * scaleFactor
-      }
-    });
-    return sources[0].thumbnail.toDataURL();
+  ipcMain.on("translation-result", (_event, result) => {
+    if (toolbarWin) {
+      toolbarWin.webContents.send("translation-result", result);
+    }
+  });
+  ipcMain.on("resize-toolbar", (_event, { width, height }) => {
+    if (toolbarWin) {
+      toolbarWin.setBounds({ width, height });
+    }
   });
   ipcMain.on("app-quit", () => {
     app.quit();

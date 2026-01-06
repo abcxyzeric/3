@@ -1,39 +1,52 @@
 import { useState, useEffect } from 'react'
-import { GripHorizontal, Circle, Scan, Settings, X, Save } from 'lucide-react'
+import { GripHorizontal, Circle, Scan, Settings, X, Save, Copy, ChevronDown } from 'lucide-react'
 import './Toolbar.css'
+
+const AVAILABLE_MODELS = [
+    { id: 'gemini-3-flash', name: 'Gemini 3 Flash' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' }
+]
 
 export default function Toolbar() {
     const [status, setStatus] = useState<'connected' | 'disconnected'>('disconnected')
     const [showSettings, setShowSettings] = useState(false)
-    const [modelId, setModelId] = useState('')
+    const [modelId, setModelId] = useState('gemini-3-flash')
     const [systemPrompt, setSystemPrompt] = useState('')
+    const [translationResult, setTranslationResult] = useState<string | null>(null)
 
-    // Load settings
+    // Load settings & listen for translation results
     useEffect(() => {
         const storedModel = localStorage.getItem('modelId') || 'gemini-3-flash'
         const storedPrompt = localStorage.getItem('systemPrompt') || 'Translate this text to Vietnamese.'
         setModelId(storedModel)
         setSystemPrompt(storedPrompt)
 
-        // Poll server for status (optional, mock for now)
+        // Status check (mock - assume connected if server running)
         const interval = setInterval(() => {
-            // Implement health check here if needed
-            // setStatus('connected') etc.
-            // For now, assume connected if dark-server is running
             setStatus('connected')
         }, 2000)
 
-        return () => clearInterval(interval)
+        // Listen for translation result from Main Process
+        window.ipcRenderer.on('translation-result', (_event: any, result: string) => {
+            setTranslationResult(result)
+        })
+
+        return () => {
+            clearInterval(interval)
+            // Note: Ideally remove listener too, but for simplicity...
+        }
     }, [])
 
-    // Handle Resize
+    // Handle Toolbar Resize for Settings Panel
     useEffect(() => {
         if (showSettings) {
-            window.ipcRenderer.send('resize-me', { width: 600, height: 450 })
+            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 400 })
+        } else if (translationResult) {
+            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 250 })
         } else {
-            window.ipcRenderer.send('resize-me', { width: 600, height: 80 })
+            window.ipcRenderer.send('resize-toolbar', { width: 500, height: 70 })
         }
-    }, [showSettings])
+    }, [showSettings, translationResult])
 
     const handleSave = () => {
         localStorage.setItem('modelId', modelId)
@@ -42,67 +55,100 @@ export default function Toolbar() {
     }
 
     const handleScan = () => {
-        window.ipcRenderer.send('start-scan')
+        setTranslationResult(null) // Clear previous result
+        window.ipcRenderer.send('trigger-scan')
     }
 
     const handleClose = () => {
         window.ipcRenderer.send('app-quit')
     }
 
+    const copyResult = () => {
+        if (translationResult) {
+            navigator.clipboard.writeText(translationResult)
+        }
+    }
+
+    const clearResult = () => {
+        setTranslationResult(null)
+    }
+
     return (
         <div className="toolbar-container">
-            {/* Navbar */}
+            {/* Main Nav Bar */}
             <div className="toolbar-nav drag-handle">
-                <div className="flex items-center gap-4" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <GripHorizontal className="text-gray-500" style={{ opacity: 0.5 }} />
-                    <div className="status-indicator no-drag" title={status === 'connected' ? "Connected" : "Disconnected"}>
-                        <Circle size={10} fill={status === 'connected' ? '#22c55e' : '#ef4444'} stroke="none" />
-                        <span className="status-text">
-                            {status === 'connected' ? 'ONLINE' : 'OFFLINE'}
-                        </span>
+                <div className="nav-left no-drag">
+                    <GripHorizontal size={18} style={{ opacity: 0.4, marginRight: 8 }} />
+                    <div className="status-indicator" title={status === 'connected' ? 'Connected' : 'Disconnected'}>
+                        <Circle size={8} fill={status === 'connected' ? '#22c55e' : '#ef4444'} stroke="none" />
+                        <span className="status-text">{status === 'connected' ? 'ONLINE' : 'OFFLINE'}</span>
                     </div>
                 </div>
 
-                <div className="flex items-center no-drag" style={{ display: 'flex', alignItems: 'center' }}>
+                <div className="nav-right no-drag">
                     <button onClick={handleScan} className="scan-btn">
-                        <Scan size={18} />
+                        <Scan size={16} />
                         SCAN
                     </button>
-
-                    <div style={{ width: 10 }} />
 
                     <button
                         onClick={() => setShowSettings(!showSettings)}
                         className={`icon-btn ${showSettings ? 'active' : ''}`}
                     >
-                        <Settings size={20} />
+                        <Settings size={18} />
                     </button>
 
-                    <div className="separator"></div>
+                    <div className="separator" />
 
                     <button onClick={handleClose} className="icon-btn btn-danger">
-                        <X size={20} />
+                        <X size={18} />
                     </button>
                 </div>
             </div>
 
+            {/* Translation Result Panel */}
+            {translationResult && !showSettings && (
+                <div className="result-panel">
+                    <div className="result-header">
+                        <span className="result-title">Translation Result</span>
+                        <div className="result-actions">
+                            <button className="icon-btn-sm" onClick={copyResult} title="Copy">
+                                <Copy size={14} />
+                            </button>
+                            <button className="icon-btn-sm" onClick={clearResult} title="Clear">
+                                <X size={14} />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="result-content">
+                        {translationResult}
+                    </div>
+                </div>
+            )}
+
             {/* Settings Panel */}
             {showSettings && (
-                <div className="settings-panel no-drag">
-                    <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, color: '#ddd' }}>
-                        <Settings size={18} /> Configuration
+                <div className="settings-panel">
+                    <h3 className="settings-title">
+                        <Settings size={16} /> Configuration
                     </h3>
 
                     <div className="form-group">
-                        <label className="form-label">Model ID</label>
-                        <select
-                            value={modelId}
-                            onChange={(e) => setModelId(e.target.value)}
-                            className="form-input"
-                        >
-                            <option value="gemini-3-flash">gemini-3-flash</option>
-                            <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
-                        </select>
+                        <label className="form-label">Model</label>
+                        <div className="select-wrapper">
+                            <select
+                                value={modelId}
+                                onChange={(e) => setModelId(e.target.value)}
+                                className="form-select"
+                            >
+                                {AVAILABLE_MODELS.map((model) => (
+                                    <option key={model.id} value={model.id}>
+                                        {model.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <ChevronDown size={14} className="select-icon" />
+                        </div>
                     </div>
 
                     <div className="form-group" style={{ flex: 1 }}>
@@ -110,14 +156,14 @@ export default function Toolbar() {
                         <textarea
                             value={systemPrompt}
                             onChange={(e) => setSystemPrompt(e.target.value)}
-                            className="form-input form-textarea"
-                            placeholder="Enter system prompt instructions..."
+                            className="form-textarea"
+                            placeholder="Enter instructions for the AI..."
                         />
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="settings-footer">
                         <button onClick={handleSave} className="save-btn">
-                            <Save size={16} /> Save Settings
+                            <Save size={14} /> Save
                         </button>
                     </div>
                 </div>

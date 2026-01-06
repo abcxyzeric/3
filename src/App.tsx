@@ -4,28 +4,28 @@ import SnippetOverlay from './components/SnippetOverlay'
 import './App.css'
 
 function App() {
-  const [isOverlay, setIsOverlay] = useState(false)
+  const [route, setRoute] = useState<'toolbar' | 'overlay'>('toolbar')
 
   useEffect(() => {
-    // Check initial hash or query
-    if (window.location.hash.includes('overlay') || window.location.search.includes('overlay')) {
-      setIsOverlay(true)
-    }
-
-    const handleHashChange = () => {
-      if (window.location.hash.includes('overlay')) {
-        setIsOverlay(true)
+    // Determine route based on hash
+    const determineRoute = () => {
+      const hash = window.location.hash
+      if (hash.includes('overlay')) {
+        setRoute('overlay')
       } else {
-        setIsOverlay(false)
+        setRoute('toolbar')
       }
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
+
+    determineRoute()
+
+    window.addEventListener('hashchange', determineRoute)
+    return () => window.removeEventListener('hashchange', determineRoute)
   }, [])
 
   return (
     <div className="app-container">
-      {isOverlay ? <SnippetOverlay /> : <Toolbar />}
+      {route === 'overlay' ? <SnippetOverlay /> : <Toolbar />}
     </div>
   )
 }

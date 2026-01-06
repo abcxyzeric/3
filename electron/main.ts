@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 process.env.APP_ROOT = path.join(__dirname, '..')
 
-// Disable Hardware Acceleration to fix visual glitches on Windows with transparent windows
+// CRITICAL: Disable Hardware Acceleration to fix visual glitches on Windows with transparent windows
 app.disableHardwareAcceleration()
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -18,19 +18,22 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
-let win: BrowserWindow | null = null
+// ============= WINDOW REFERENCES =============
+let toolbarWin: BrowserWindow | null = null
 let overlayWin: BrowserWindow | null = null
 let serverProcess: ChildProcess | null = null
 
+// ============= SERVER PATH =============
 const SERVER_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'server', 'dark-server.js')
   : path.join(process.env.APP_ROOT, 'server', 'dark-server.js')
 
+// ============= SERVER MANAGEMENT =============
 function startServer() {
   console.log('Starting dark-server at:', SERVER_PATH)
   serverProcess = fork(SERVER_PATH, [], {
     stdio: 'inherit',
-    env: { ...process.env, PORT: '3000', WS_PORT: '9998' }
+    env: { ...process.env }
   })
 }
 
@@ -41,10 +44,11 @@ function stopServer() {
   }
 }
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: 600,
-    height: 80,
+// ============= TOOLBAR WINDOW (Window A) =============
+function createToolbarWindow() {
+  toolbarWin = new BrowserWindow({
+    width: 500,
+    height: 70,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -58,19 +62,22 @@ function createWindow() {
     }
   })
 
+  // Load Toolbar Route (default route or #/toolbar)
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL)
+    toolbarWin.loadURL(VITE_DEV_SERVER_URL) // Default route is Toolbar
   } else {
-    win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+    toolbarWin.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  toolbarWin.on('closed', () => {
+    toolbarWin = null
+    // When toolbar closes, quit app
+    app.quit()
+  })
 }
 
+// ============= OVERLAY WINDOW (Window B) =============
 function createOverlayWindow() {
-  if (overlayWin) {
-    overlayWin.show()
-    return
-  }
-
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width, height } = primaryDisplay.bounds
 
@@ -85,28 +92,29 @@ function createOverlayWindow() {
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
+    show: false, // HIDDEN by default
     enableLargerThanScreen: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // Allow loading local base64
+      webSecurity: false
     }
   })
 
-  const urlToLoad = VITE_DEV_SERVER_URL
+  // Load Overlay Route
+  const overlayUrl = VITE_DEV_SERVER_URL
     ? `${VITE_DEV_SERVER_URL}#/overlay`
     : `file://${path.join(RENDERER_DIST, 'index.html')}#/overlay`
 
-  overlayWin.loadURL(urlToLoad)
-
-  // overlayWin.webContents.openDevTools({ mode: "detach" })
+  overlayWin.loadURL(overlayUrl)
 
   overlayWin.on('closed', () => {
     overlayWin = null
   })
 }
 
+// ============= APP LIFECYCLE =============
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
@@ -119,50 +127,65 @@ app.on('before-quit', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
+    createToolbarWindow()
+    createOverlayWindow()
   }
 })
 
 app.whenReady().then(() => {
   startServer()
-  createWindow()
+  createToolbarWindow()
+  createOverlayWindow()
 
-  ipcMain.on('start-scan', () => {
-    createOverlayWindow()
-  })
+  // ============= IPC HANDLERS =============
 
-  ipcMain.on('close-overlay', () => {
+  // Show Overlay when Scan is triggered
+  ipcMain.on('trigger-scan', async () => {
     if (overlayWin) {
-      overlayWin.close()
-      overlayWin = null
+      // Capture screen BEFORE showing overlay to avoid capturing itself
+      const primaryDisplay = screen.getPrimaryDisplay()
+      const { width, height } = primaryDisplay.bounds
+      const scaleFactor = primaryDisplay.scaleFactor || 1
+
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: width * scaleFactor,
+          height: height * scaleFactor
+        }
+      })
+
+      const screenImage = sources[0].thumbnail.toDataURL()
+
+      // Send image to overlay before showing it
+      overlayWin.webContents.send('screen-captured', screenImage)
+      overlayWin.show()
+      overlayWin.focus()
     }
   })
 
-  ipcMain.on('resize-me', (_event, { width, height }) => {
-    if (win) {
-      win.setBounds({ width, height })
-      // win.center()
+  // Hide Overlay when done
+  ipcMain.on('hide-overlay', () => {
+    if (overlayWin) {
+      overlayWin.hide()
     }
   })
 
-  ipcMain.handle('get-screen-image', async () => {
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const { width, height } = primaryDisplay.bounds
-    // Get correct scale factor
-    const scaleFactor = primaryDisplay.scaleFactor || 1
-
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: width * scaleFactor,
-        height: height * scaleFactor
-      }
-    })
-
-    // Return the first screen source
-    return sources[0].thumbnail.toDataURL()
+  // Forward translation result to Toolbar
+  ipcMain.on('translation-result', (_event, result: string) => {
+    if (toolbarWin) {
+      toolbarWin.webContents.send('translation-result', result)
+    }
   })
 
+  // Toolbar resize (for Settings Panel expand/collapse)
+  ipcMain.on('resize-toolbar', (_event, { width, height }) => {
+    if (toolbarWin) {
+      toolbarWin.setBounds({ width, height })
+    }
+  })
+
+  // Quit App
   ipcMain.on('app-quit', () => {
     app.quit()
   })
